@@ -8,11 +8,12 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { maxHttpBufferSize: 3e6 }); // room for meme uploads
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (_req, res) => res.send('ok'));
@@ -41,6 +42,30 @@ async function getIceServers() {
 }
 app.get('/ice', async (_req, res) => res.json(await getIceServers()));
 
+// ---- Optional GIF search (GIPHY). Set GIPHY_API_KEY in Render to turn it on. ----
+app.get('/config', (_req, res) => res.json({ gifs: !!process.env.GIPHY_API_KEY }));
+app.get('/gifs', async (req, res) => {
+  const key = process.env.GIPHY_API_KEY;
+  if (!key) return res.status(404).json({ error: 'GIF search is not set up' });
+  const q = String(req.query.q || '').trim().slice(0, 50);
+  const base = 'https://api.giphy.com/v1/gifs/';
+  const url = q
+    ? `${base}search?api_key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&limit=24&rating=r`
+    : `${base}trending?api_key=${encodeURIComponent(key)}&limit=24&rating=r`;
+  try {
+    const r = await fetch(url);
+    const j = await r.json();
+    res.json((j.data || []).map((g) => ({
+      id: g.id,
+      preview: g.images?.fixed_width_small?.url || g.images?.fixed_height_small?.url,
+      url: g.images?.fixed_height?.url || g.images?.original?.url,
+    })).filter((g) => g.preview && g.url));
+  } catch {
+    res.status(502).json({ error: 'GIF search failed' });
+  }
+});
+const isGiphyUrl = (u) => { try { const x = new URL(u); return x.protocol === 'https:' && /(^|\.)giphy\.com$/.test(x.hostname); } catch { return false; } };
+
 /** code -> { users: Map<socketId,{name}>, video, broadcasters: Set<socketId>, chat[] } */
 const MAX_LIVE = 4;
 const rooms = new Map();
@@ -48,9 +73,21 @@ const rooms = new Map();
 const cleanCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
 const cleanName = (n) => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Guest';
 const isVideoId = (id) => /^[A-Za-z0-9_-]{11}$/.test(String(id || ''));
+const FONTS = new Set(['Inter', 'Space Grotesk', 'Comic Neue', 'Bangers', 'Pacifico', 'Press Start 2P', 'Courier Prime', 'Permanent Marker', 'Caveat']);
+function cleanStyle(st) {
+  const out = {};
+  if (/^#[0-9a-fA-F]{6}$/.test(st?.color || '')) out.color = st.color;
+  if (FONTS.has(st?.font)) out.font = st.font;
+  if (st?.bold) out.bold = true;
+  return out;
+}
+const isEmoji = (e) => typeof e === 'string' && e.length <= 16 && /\p{Extended_Pictographic}/u.test(e) && !/[<>&"'\s]/.test(e);
+const MEME_MAX = 30;
+const MEME_BYTES = 10e6;
+const MEME_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 
 function getRoom(code) {
-  if (!rooms.has(code)) rooms.set(code, { users: new Map(), video: null, broadcasters: new Set(), chat: [] });
+  if (!rooms.has(code)) rooms.set(code, { users: new Map(), video: null, broadcasters: new Set(), chat: [], memes: [] });
   return rooms.get(code);
 }
 
@@ -94,6 +131,7 @@ io.on('connection', (socket) => {
     if (c.length < 3) return ack?.({ error: 'Room code must be 3–8 letters or numbers' });
     code = c;
     name = cleanName(payload?.name);
+    const entrance = String(payload?.entrance || '').replace(/\s+/g, ' ').trim().slice(0, 60);
     const r = getRoom(code);
     socket.join(code);
     r.users.set(socket.id, { name });
@@ -103,10 +141,11 @@ io.on('connection', (socket) => {
       room: code,
       video: liveVideo(r.video),
       chat: r.chat.slice(-60),
+      memes: r.memes,
       broadcasters: [...r.broadcasters].map((id) => ({ id, name: r.users.get(id)?.name })),
     });
     io.to(code).emit('roster', roster(r));
-    socket.to(code).emit('presence', { type: 'join', name });
+    socket.to(code).emit('presence', { type: 'join', name, line: entrance });
     sys(code, `${name} joined`);
   });
 
@@ -130,14 +169,40 @@ io.on('connection', (socket) => {
   socket.on('video:sync', (_p, ack) => ack?.(liveVideo(room()?.video)));
 
   // ---- Chat + reactions ----
-  socket.on('chat', ({ text } = {}) => {
+  socket.on('chat', ({ text, style } = {}) => {
     const t = String(text || '').trim().slice(0, 500);
-    if (room() && t) pushChat(code, { name, text: t, ts: Date.now() });
+    if (room() && t) pushChat(code, { name, text: t, ts: Date.now(), style: cleanStyle(style) });
   });
 
-  const EMOJI = new Set(['😂', '🔥', '😮', '❤️', '👏', '💀']);
+  // Light flood protection for reactions and memes.
+  let lastBurst = 0;
+  const tooFast = () => { const now = Date.now(); if (now - lastBurst < 150) return true; lastBurst = now; return false; };
+
   socket.on('react', ({ emoji } = {}) => {
-    if (room() && EMOJI.has(emoji)) io.to(code).emit('react', { emoji, name });
+    if (room() && isEmoji(emoji) && !tooFast()) io.to(code).emit('react', { emoji, name });
+  });
+
+  // ---- Meme reactions ----
+  socket.on('meme:add', ({ data } = {}, ack) => {
+    const r = room();
+    if (!r) return;
+    if (typeof data !== 'string' || data.length > 2.2e6 || !MEME_RE.test(data)) {
+      return ack?.({ error: 'That image is too big or not a supported type' });
+    }
+    const m = { id: crypto.randomUUID().slice(0, 8), data, by: name };
+    r.memes.push(m);
+    let total = r.memes.reduce((n, x) => n + x.data.length, 0);
+    while (r.memes.length > MEME_MAX || total > MEME_BYTES) total -= r.memes.shift().data.length;
+    io.to(code).emit('meme:added', m);
+    io.to(code).emit('meme:show', { id: m.id, name });
+    ack?.({ ok: true, id: m.id });
+  });
+
+  socket.on('meme:send', ({ id, url } = {}) => {
+    const r = room();
+    if (!r || tooFast()) return;
+    if (id && r.memes.some((m) => m.id === id)) io.to(code).emit('meme:show', { id, name });
+    else if (url && isGiphyUrl(url)) io.to(code).emit('meme:show', { url, name });
   });
 
   // ---- Go live (WebRTC signaling relay; up to MAX_LIVE broadcasters per room) ----

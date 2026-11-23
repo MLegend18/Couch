@@ -6,7 +6,7 @@
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>Couch — watch together</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=Comic+Neue:wght@400;700&family=Bangers&family=Pacifico&family=Press+Start+2P&family=Courier+Prime:wght@400;700&family=Permanent+Marker&family=Caveat:wght@500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -37,12 +37,24 @@
     <header class="top">
       <div class="brand"><span class="dot"></span>Couch</div>
       <button id="copyLink" class="chip" title="Copy invite link">Room <b id="roomCode"></b> · Copy invite</button>
+      <button id="customizeBtn" class="chip">🎨 Customize</button>
       <div id="people" class="people"></div>
     </header>
 
     <section class="stage">
       <div class="screen">
         <div id="player"></div>
+        <div id="shield" class="shield hidden" title="Click to play or pause"></div>
+        <div id="vctrl" class="vctrl hidden">
+          <button id="vPlay" class="vbtn" title="Play / pause (space)">▶</button>
+          <span id="vCur" class="vtime">0:00</span>
+          <input id="vSeek" class="vseek" type="range" min="0" max="0" step="0.1" value="0" aria-label="Seek" />
+          <span id="vDur" class="vtime">0:00</span>
+          <button id="vMute" class="vbtn" title="Mute">🔊</button>
+          <input id="vVol" class="vvol" type="range" min="0" max="100" value="100" aria-label="Volume" />
+          <button id="vFull" class="vbtn" title="Full screen">⛶</button>
+        </div>
+        <div id="memeLayer" class="memelayer"></div>
         <div id="emptyScreen" class="empty">
           <div>
             <h2>Nothing playing yet</h2>
@@ -64,8 +76,9 @@
 
       <div class="reactions">
         <span class="react-label">React</span>
-        <button data-e="😂" title="Laugh">😂</button><button data-e="🔥" title="Fire">🔥</button><button data-e="😮" title="Wow">😮</button>
-        <button data-e="❤️" title="Love">❤️</button><button data-e="👏" title="Clap">👏</button><button data-e="💀" title="Dead">💀</button>
+        <div id="quickEmoji" class="quick"></div>
+        <button id="moreEmoji" class="rbtn more" title="More emojis">＋</button>
+        <button id="memeBtn" class="rbtn meme" title="Meme reactions">🖼️ Memes</button>
       </div>
     </section>
 
@@ -81,6 +94,7 @@
       <div class="chat">
         <ol id="messages"></ol>
         <form id="chatForm">
+          <button type="button" id="chatEmoji" class="ghost iconbtn" title="Add an emoji">😀</button>
           <input id="chatInput" maxlength="500" placeholder="Say something…" autocomplete="off" />
           <button class="primary">Send</button>
         </form>
@@ -90,7 +104,62 @@
 
   <div id="toast" class="toast"></div>
 
+  <!-- Pop-up sheets -->
+  <div id="backdrop" class="backdrop hidden"></div>
+
+  <section id="emojiSheet" class="sheet hidden" aria-label="Emojis">
+    <header><h3 id="emojiTitle">Emojis</h3><button class="close" title="Close">✕</button></header>
+    <div id="emojiBody" class="emoji-body"></div>
+  </section>
+
+  <section id="memeSheet" class="sheet hidden" aria-label="Meme reactions">
+    <header><h3>Meme reactions</h3><button class="close" title="Close">✕</button></header>
+    <div class="tabs">
+      <button data-tab="room" class="tab on">Room memes</button>
+      <button data-tab="gifs" class="tab hidden" id="gifTabBtn">GIFs</button>
+    </div>
+    <div id="tab-room" class="tabpane">
+      <p class="fine">Tap a meme to throw it on screen. Uploads are shared with everyone in this room until it empties.</p>
+      <div id="memeGrid" class="memegrid">
+        <label class="upload-tile"><input id="memeFile" type="file" accept="image/*" hidden /><b>＋</b><span>Upload meme</span></label>
+      </div>
+    </div>
+    <div id="tab-gifs" class="tabpane hidden">
+      <form id="gifForm" class="row"><input id="gifQuery" placeholder="Search GIFs…" autocomplete="off" /><button class="primary">Search</button></form>
+      <div id="gifGrid" class="memegrid gifs"></div>
+      <p class="fine">Powered by GIPHY</p>
+    </div>
+  </section>
+
+  <section id="customSheet" class="sheet hidden" aria-label="Customize">
+    <header><h3>Customize</h3><button class="close" title="Close">✕</button></header>
+    <p class="fine">These are saved on this device. Your chat style and entrance line are what everyone else sees.</p>
+
+    <h4>Colors</h4>
+    <div class="seg" id="modeSeg"><button data-mode="dark">🌙 Dark</button><button data-mode="light">☀️ Light</button></div>
+    <div id="themeGrid" class="themes"></div>
+    <div class="row customcolors">
+      <label>Main color <input type="color" id="accent1" /></label>
+      <label>Second color <input type="color" id="accent2" /></label>
+    </div>
+
+    <h4>Your chat style</h4>
+    <label>Name color</label>
+    <div class="row swatchrow"><div id="nameSwatches" class="swatches"></div><input type="color" id="nameColor" title="Pick any color" /></div>
+    <label>Font <select id="fontSelect"></select></label>
+    <label class="check"><input type="checkbox" id="boldCheck" /> Bold messages</label>
+    <label>Chat text size
+      <select id="sizeSelect"><option value="13">Small</option><option value="15">Medium</option><option value="18">Large</option><option value="21">Extra large</option></select>
+    </label>
+    <div class="preview"><ol id="chatPreview"></ol></div>
+
+    <h4>Your entrance line</h4>
+    <input id="entranceInput" maxlength="60" placeholder="just pulled up to the couch" />
+    <p class="fine">Shows in the banner everyone sees when you join a room. Takes effect next time you join.</p>
+  </section>
+
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
+  <script src="features.js"></script>
 </body>
 </html>

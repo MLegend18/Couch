@@ -29,7 +29,7 @@ $('#joinForm').onsubmit = (e) => {
   const room = $('#roomInput').value.trim() || randomCode();
   try { localStorage.setItem('couch:name', name); } catch {}
   socket.connect();
-  socket.emit('join', { name, room }, (res) => {
+  socket.emit('join', { name, room, entrance: getEntrance() }, (res) => {
     if (res?.error) { $('#lobbyError').textContent = res.error; socket.disconnect(); return; }
     myId = res.you;
     roomCode = res.room;
@@ -40,6 +40,7 @@ $('#joinForm').onsubmit = (e) => {
     res.chat.forEach(addMessage);
     if (res.video) applyState(res.video);
     res.broadcasters.forEach(onLiveStarted);
+    onJoinedExtras(res);
   });
 };
 
@@ -64,7 +65,14 @@ socket.on('roster', (list) => {
 function addMessage(m) {
   const li = document.createElement('li');
   if (m.sys) { li.className = 'sys'; li.textContent = m.text; }
-  else { const b = document.createElement('b'); b.textContent = m.name; li.append(b, document.createTextNode(m.text)); }
+  else {
+    const b = document.createElement('b');
+    b.textContent = m.name;
+    const t = document.createElement('span');
+    t.textContent = m.text;
+    styleMessage(b, t, m.style);
+    li.append(b, t);
+  }
   const list = $('#messages');
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
   list.appendChild(li);
@@ -74,23 +82,19 @@ socket.on('chat', addMessage);
 $('#chatForm').onsubmit = (e) => {
   e.preventDefault();
   const t = $('#chatInput').value.trim();
-  if (t) socket.emit('chat', { text: t });
+  if (t) socket.emit('chat', { text: t, style: myStyle() });
   $('#chatInput').value = '';
 };
 
-document.querySelectorAll('.reactions button').forEach((b) => (b.onclick = () => {
-  socket.emit('react', { emoji: b.dataset.e });
-  b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
-}));
 
 // Pop-up banner when someone joins, leaves, or goes live.
-socket.on('presence', ({ type, name }) => {
+socket.on('presence', ({ type, name, line }) => {
   const el = document.createElement('div');
   el.className = `banner ${type}`;
   const icon = document.createElement('span'); icon.className = 'big';
   icon.textContent = type === 'join' ? '👋' : type === 'live' ? '🔴' : '🚪';
   const who = document.createElement('b'); who.textContent = name;
-  const what = type === 'join' ? ' just pulled up to the couch' : type === 'live' ? ' is live now' : ' left the room';
+  const what = type === 'join' ? ` ${line || 'just pulled up to the couch'}` : type === 'live' ? ' is live now' : ' left the room';
   el.append(icon, who, document.createTextNode(what));
   const box = $('#banners');
   box.appendChild(el);
@@ -125,7 +129,8 @@ function createPlayer() {
   if (player || !window.YT?.Player) return;
   player = new YT.Player('player', {
     host: 'https://www.youtube.com',
-    playerVars: { rel: 0, playsinline: 1, modestbranding: 1, origin: location.origin },
+    // controls: 0 hides YouTube's own controls; Couch draws its own and blocks clicks that would open youtube.com.
+    playerVars: { rel: 0, playsinline: 1, modestbranding: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, origin: location.origin },
     events: {
       onReady: () => { playerReady = true; if (lastState) applyState(stateNow()); },
       onStateChange,
@@ -217,6 +222,7 @@ const currentId = () => player?.getVideoData?.()?.video_id || null;
 function applyState(s) {
   lastState = { id: s.id, playing: s.playing, time: s.time, at: performance.now() };
   $('#emptyScreen').classList.add('hidden');
+  onVideoShown();
   if (s.by && !s.loaded) toast(`${s.by} ${s.playing ? 'played' : 'paused'}`);
   if (!playerReady) return; // onReady will apply it
   $('#tapToPlay').classList.add('hidden');
