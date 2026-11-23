@@ -30,7 +30,7 @@ $('#joinForm').onsubmit = (e) => {
     $('#app').classList.remove('hidden');
     res.chat.forEach(addMessage);
     if (res.video) applyState(res.video);
-    if (res.broadcaster) onLiveStarted(res.broadcaster);
+    res.broadcasters.forEach(onLiveStarted);
   });
 };
 
@@ -69,7 +69,25 @@ $('#chatForm').onsubmit = (e) => {
   $('#chatInput').value = '';
 };
 
-document.querySelectorAll('.reactions button').forEach((b) => (b.onclick = () => socket.emit('react', { emoji: b.dataset.e })));
+document.querySelectorAll('.reactions button').forEach((b) => (b.onclick = () => {
+  socket.emit('react', { emoji: b.dataset.e });
+  b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
+}));
+
+// Pop-up banner when someone joins, leaves, or goes live.
+socket.on('presence', ({ type, name }) => {
+  const el = document.createElement('div');
+  el.className = `banner ${type}`;
+  const icon = document.createElement('span'); icon.className = 'big';
+  icon.textContent = type === 'join' ? '👋' : type === 'live' ? '🔴' : '🚪';
+  const who = document.createElement('b'); who.textContent = name;
+  const what = type === 'join' ? ' just pulled up to the couch' : type === 'live' ? ' is live now' : ' left the room';
+  el.append(icon, who, document.createTextNode(what));
+  const box = $('#banners');
+  box.appendChild(el);
+  while (box.children.length > 3) box.firstChild.remove();
+  setTimeout(() => el.remove(), 4100);
+});
 socket.on('react', ({ emoji, name }) => {
   const f = document.createElement('div');
   f.className = 'floater';
@@ -174,23 +192,22 @@ $('#loadForm').onsubmit = (e) => {
 };
 $('#syncBtn').onclick = () => socket.emit('video:sync', null, (v) => (v ? applyState(v) : toast('Nothing playing yet')));
 
-// ---------- Go live (WebRTC, broadcaster -> each viewer) ----------
+// ---------- Go live (WebRTC). Up to 4 people live at once; each sends to every viewer. ----------
 let localStream = null;
-let broadcasterId = null;
-const peers = new Map(); // peerId -> { pc, chain }
+const peers = new Map(); // "ownerId>viewerId" -> { pc, chain }
+const keyOf = (owner, viewer) => `${owner}>${viewer}`;
 
-function closePeer(id) {
-  const p = peers.get(id);
-  if (p) { p.pc.close(); peers.delete(id); }
+function closePeer(key) {
+  const p = peers.get(key);
+  if (p) { p.pc.close(); peers.delete(key); }
 }
-function closeAllPeers() { [...peers.keys()].forEach(closePeer); }
-const signal = (to, data) => socket.emit('rtc:signal', { to, data });
+const signal = (to, key, data) => socket.emit('rtc:signal', { to, data: { ...data, key } });
 
-function makePeer(id) {
+function makePeer(key, remoteId) {
   const pc = new RTCPeerConnection(ICE);
-  pc.onicecandidate = (e) => e.candidate && signal(id, { candidate: e.candidate });
+  pc.onicecandidate = (e) => e.candidate && signal(remoteId, key, { candidate: e.candidate });
   const entry = { pc, chain: Promise.resolve() };
-  peers.set(id, entry);
+  peers.set(key, entry);
   return entry;
 }
 
@@ -205,7 +222,7 @@ async function startLive(kind) {
   }
   socket.emit('live:start', null, (res) => {
     if (res?.error) { stopTracks(); return toast(res.error); }
-    showLive('You', localStream, true);
+    addTile(myId, 'You', localStream, true);
     $('#camBtn').classList.add('hidden'); $('#screenBtn').classList.add('hidden'); $('#stopBtn').classList.remove('hidden');
     localStream.getVideoTracks()[0].onended = stopLive; // browser "Stop sharing" button
   });
@@ -215,7 +232,9 @@ function stopTracks() { localStream?.getTracks().forEach((t) => t.stop()); local
 function stopLive() {
   if (!localStream) return;
   socket.emit('live:stop');
-  stopTracks(); closeAllPeers(); hideLive();
+  stopTracks();
+  [...peers.keys()].filter((k) => k.startsWith(`${myId}>`)).forEach(closePeer);
+  removeTile(myId);
   $('#camBtn').classList.remove('hidden'); $('#screenBtn').classList.remove('hidden'); $('#stopBtn').classList.add('hidden');
 }
 
@@ -223,38 +242,36 @@ $('#camBtn').onclick = () => startLive('camera');
 $('#screenBtn').onclick = () => startLive('screen');
 $('#stopBtn').onclick = stopLive;
 
-// Broadcaster: a viewer wants the stream -> send them an offer.
+// I'm live and someone wants to watch -> send them an offer.
 socket.on('live:viewer', async ({ id }) => {
   if (!localStream) return;
-  closePeer(id);
-  const { pc } = makePeer(id);
+  const key = keyOf(myId, id);
+  closePeer(key);
+  const { pc } = makePeer(key, id);
   localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  signal(id, { sdp: pc.localDescription });
+  await pc.setLocalDescription(await pc.createOffer());
+  signal(id, key, { sdp: pc.localDescription });
 });
-socket.on('live:viewer-left', ({ id }) => closePeer(id));
+socket.on('live:viewer-left', ({ id }) => closePeer(keyOf(myId, id)));
 
-// Viewer side
+// Someone else went live -> make a tile and ask for their stream.
 function onLiveStarted({ id, name }) {
   if (id === myId) return;
-  broadcasterId = id;
-  $('#liveName').textContent = `${name} is live`;
-  $('#livePanel').classList.remove('hidden');
-  socket.emit('live:watch');
+  addTile(id, name, null, false);
+  socket.emit('live:watch', { id });
 }
 socket.on('live:started', onLiveStarted);
-socket.on('live:ended', ({ id }) => {
-  if (id === broadcasterId) { closePeer(id); broadcasterId = null; hideLive(); }
-});
+socket.on('live:ended', ({ id }) => { closePeer(keyOf(id, myId)); removeTile(id); });
 
-// Both sides: handle offers/answers/candidates in order, per peer.
+// Offers/answers/candidates, handled in order per connection.
 socket.on('rtc:signal', ({ from, data }) => {
-  let entry = peers.get(from);
+  const key = data?.key;
+  if (key !== keyOf(from, myId) && key !== keyOf(myId, from)) return;
+  let entry = peers.get(key);
   if (!entry) {
-    if (!data.sdp || data.sdp.type !== 'offer') return;
-    entry = makePeer(from);
-    entry.pc.ontrack = (e) => showLive(null, e.streams[0], false);
+    if (key !== keyOf(from, myId) || data.sdp?.type !== 'offer') return;
+    entry = makePeer(key, from);
+    entry.pc.ontrack = (e) => setTileStream(from, e.streams[0]);
   }
   entry.chain = entry.chain.then(async () => {
     const { pc } = entry;
@@ -262,7 +279,7 @@ socket.on('rtc:signal', ({ from, data }) => {
       await pc.setRemoteDescription(data.sdp);
       if (data.sdp.type === 'offer') {
         await pc.setLocalDescription(await pc.createAnswer());
-        signal(from, { sdp: pc.localDescription });
+        signal(from, key, { sdp: pc.localDescription });
       }
     } else if (data.candidate) {
       await pc.addIceCandidate(data.candidate).catch(() => {});
@@ -270,26 +287,39 @@ socket.on('rtc:signal', ({ from, data }) => {
   }).catch((err) => console.warn('WebRTC error', err));
 });
 
-function showLive(label, stream, isSelf) {
-  const v = $('#liveVideo');
+// ---------- Live tiles ----------
+const tileOf = (id) => document.getElementById(`tile-${id}`);
+function addTile(id, name, stream, isSelf) {
+  let t = tileOf(id);
+  if (!t) {
+    t = document.createElement('div');
+    t.className = 'tile';
+    t.id = `tile-${id}`;
+    t.innerHTML = '<div class="live-head"><span class="badge">LIVE</span> <span class="nm"></span></div>'
+      + '<video autoplay playsinline muted></video><button class="chip unmute">🔇 Unmute</button>';
+    const v = t.querySelector('video');
+    const b = t.querySelector('button');
+    if (isSelf) b.remove();
+    else b.onclick = () => { v.muted = !v.muted; v.play().catch(() => {}); b.textContent = v.muted ? '🔇 Unmute' : '🔊 Sound on'; };
+    // Your own tile first, then others in the order they went live.
+    isSelf ? $('#liveGrid').prepend(t) : $('#liveGrid').appendChild(t);
+  }
+  t.querySelector('.nm').textContent = isSelf ? 'You' : name;
+  if (stream) setTileStream(id, stream);
+  updateGrid();
+}
+function setTileStream(id, stream) {
+  const v = tileOf(id)?.querySelector('video');
+  if (!v) return;
   v.srcObject = stream;
-  v.muted = true; // self: avoid echo; viewers: browsers block autoplay with sound
-  if (label) $('#liveName').textContent = isSelf ? 'You are live' : label;
-  $('#unmuteBtn').classList.toggle('hidden', isSelf);
-  $('#unmuteBtn').textContent = '🔇 Tap to unmute';
-  $('#livePanel').classList.remove('hidden');
   v.play().catch(() => {});
 }
-function hideLive() {
-  $('#liveVideo').srcObject = null;
-  $('#livePanel').classList.add('hidden');
+function removeTile(id) { tileOf(id)?.remove(); updateGrid(); }
+function updateGrid() {
+  const g = $('#liveGrid');
+  g.classList.toggle('hidden', g.children.length === 0);
+  g.classList.toggle('multi', g.children.length > 1);
 }
-$('#unmuteBtn').onclick = () => {
-  const v = $('#liveVideo');
-  v.muted = !v.muted;
-  v.play().catch(() => {});
-  $('#unmuteBtn').textContent = v.muted ? '🔇 Tap to unmute' : '🔊 Sound on';
-};
 
 socket.on('disconnect', () => toast('Disconnected — trying to reconnect…'));
 socket.io.on('reconnect', () => location.reload());

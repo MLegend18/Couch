@@ -17,7 +17,8 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (_req, res) => res.send('ok'));
 
-/** code -> { users: Map<socketId,{name}>, video, broadcaster, chat[] } */
+/** code -> { users: Map<socketId,{name}>, video, broadcasters: Set<socketId>, chat[] } */
+const MAX_LIVE = 4;
 const rooms = new Map();
 
 const cleanCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
@@ -25,7 +26,7 @@ const cleanName = (n) => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 24
 const isVideoId = (id) => /^[A-Za-z0-9_-]{11}$/.test(String(id || ''));
 
 function getRoom(code) {
-  if (!rooms.has(code)) rooms.set(code, { users: new Map(), video: null, broadcaster: null, chat: [] });
+  if (!rooms.has(code)) rooms.set(code, { users: new Map(), video: null, broadcasters: new Set(), chat: [] });
   return rooms.get(code);
 }
 
@@ -37,7 +38,7 @@ function liveVideo(v) {
 }
 
 function roster(r) {
-  return [...r.users].map(([id, u]) => ({ id, name: u.name, live: r.broadcaster === id }));
+  return [...r.users].map(([id, u]) => ({ id, name: u.name, live: r.broadcasters.has(id) }));
 }
 
 function pushChat(code, msg) {
@@ -56,8 +57,8 @@ io.on('connection', (socket) => {
 
   function endLive() {
     const r = room();
-    if (!r || r.broadcaster !== socket.id) return;
-    r.broadcaster = null;
+    if (!r || !r.broadcasters.has(socket.id)) return;
+    r.broadcasters.delete(socket.id);
     io.to(code).emit('live:ended', { id: socket.id });
     io.to(code).emit('roster', roster(r));
     sys(code, `${name} ended the live stream`);
@@ -78,9 +79,10 @@ io.on('connection', (socket) => {
       room: code,
       video: liveVideo(r.video),
       chat: r.chat.slice(-60),
-      broadcaster: r.broadcaster ? { id: r.broadcaster, name: r.users.get(r.broadcaster)?.name } : null,
+      broadcasters: [...r.broadcasters].map((id) => ({ id, name: r.users.get(id)?.name })),
     });
     io.to(code).emit('roster', roster(r));
+    socket.to(code).emit('presence', { type: 'join', name });
     sys(code, `${name} joined`);
   });
 
@@ -114,25 +116,26 @@ io.on('connection', (socket) => {
     if (room() && EMOJI.has(emoji)) io.to(code).emit('react', { emoji, name });
   });
 
-  // ---- Go live (WebRTC signaling relay; one broadcaster per room) ----
+  // ---- Go live (WebRTC signaling relay; up to MAX_LIVE broadcasters per room) ----
   socket.on('live:start', (_p, ack) => {
     const r = room();
     if (!r) return ack?.({ error: 'Not in a room' });
-    if (r.broadcaster && r.broadcaster !== socket.id) {
-      return ack?.({ error: `${r.users.get(r.broadcaster)?.name || 'Someone'} is already live` });
+    if (!r.broadcasters.has(socket.id) && r.broadcasters.size >= MAX_LIVE) {
+      return ack?.({ error: `${MAX_LIVE} people are already live — wait for someone to stop` });
     }
-    r.broadcaster = socket.id;
+    r.broadcasters.add(socket.id);
     ack?.({ ok: true });
     socket.to(code).emit('live:started', { id: socket.id, name });
+    socket.to(code).emit('presence', { type: 'live', name });
     io.to(code).emit('roster', roster(r));
     sys(code, `${name} went live 🔴`);
   });
 
   socket.on('live:stop', endLive);
 
-  socket.on('live:watch', () => {
+  socket.on('live:watch', ({ id } = {}) => {
     const r = room();
-    if (r?.broadcaster && r.broadcaster !== socket.id) io.to(r.broadcaster).emit('live:viewer', { id: socket.id });
+    if (r?.broadcasters.has(id) && id !== socket.id) io.to(id).emit('live:viewer', { id: socket.id });
   });
 
   socket.on('rtc:signal', ({ to, data } = {}) => {
@@ -143,13 +146,14 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const r = room();
     if (!r) return;
-    if (r.broadcaster === socket.id) endLive();
-    else if (r.broadcaster) io.to(r.broadcaster).emit('live:viewer-left', { id: socket.id });
+    endLive();
+    r.broadcasters.forEach((b) => io.to(b).emit('live:viewer-left', { id: socket.id }));
     r.users.delete(socket.id);
     if (r.users.size === 0) {
       rooms.delete(code);
     } else {
       io.to(code).emit('roster', roster(r));
+      io.to(code).emit('presence', { type: 'leave', name });
       sys(code, `${name} left`);
     }
   });

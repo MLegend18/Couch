@@ -49,6 +49,7 @@
           </div>
         </div>
         <div id="floaters" class="floaters"></div>
+        <div id="banners" class="banners"></div>
       </div>
 
       <form id="loadForm" class="loadbar">
@@ -58,17 +59,14 @@
       </form>
 
       <div class="reactions">
-        <button data-e="😂">😂</button><button data-e="🔥">🔥</button><button data-e="😮">😮</button>
-        <button data-e="❤️">❤️</button><button data-e="👏">👏</button><button data-e="💀">💀</button>
+        <span class="react-label">React</span>
+        <button data-e="😂" title="Laugh">😂</button><button data-e="🔥" title="Fire">🔥</button><button data-e="😮" title="Wow">😮</button>
+        <button data-e="❤️" title="Love">❤️</button><button data-e="👏" title="Clap">👏</button><button data-e="💀" title="Dead">💀</button>
       </div>
     </section>
 
     <aside class="side">
-      <div id="livePanel" class="live hidden">
-        <div class="live-head"><span class="badge">LIVE</span> <span id="liveName"></span></div>
-        <video id="liveVideo" autoplay playsinline muted></video>
-        <button id="unmuteBtn" class="chip unmute">🔇 Tap to unmute</button>
-      </div>
+      <div id="liveGrid" class="livegrid hidden"></div>
 
       <div class="golive">
         <button id="camBtn" class="ghost">🎥 Go live (camera)</button>
