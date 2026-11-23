@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>Couch — watch together</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -48,6 +49,9 @@
             <p>Paste a YouTube link below. Everyone in the room watches in sync.</p>
           </div>
         </div>
+        <button id="tapToPlay" class="tapcover hidden"><span>▶</span>Tap to start watching</button>
+        <button id="soundBtn" class="chip sound hidden">🔇 Tap for sound</button>
+        <div id="videoError" class="empty hidden"><div><h2>Can't play this one</h2><p id="videoErrorText"></p></div></div>
         <div id="floaters" class="floaters"></div>
         <div id="banners" class="banners"></div>
       </div>
@@ -87,7 +91,6 @@
   <div id="toast" class="toast"></div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="https://www.youtube.com/iframe_api"></script>
   <script src="app.js"></script>
 </body>
 </html>

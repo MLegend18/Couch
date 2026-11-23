@@ -121,14 +121,82 @@ let applyingRemote = false;
 let remoteTimer = null;
 let lastState = null; // { id, playing, time, at }
 
-window.onYouTubeIframeAPIReady = () => {
+function createPlayer() {
+  if (player || !window.YT?.Player) return;
   player = new YT.Player('player', {
-    playerVars: { rel: 0, playsinline: 1, modestbranding: 1 },
+    host: 'https://www.youtube.com',
+    playerVars: { rel: 0, playsinline: 1, modestbranding: 1, origin: location.origin },
     events: {
       onReady: () => { playerReady = true; if (lastState) applyState(stateNow()); },
       onStateChange,
+      onError: (e) => showVideoError(e.data),
     },
   });
+}
+// Define the callback first, then load YouTube's player code (avoids a race where it loads too early).
+window.onYouTubeIframeAPIReady = createPlayer;
+(() => {
+  if (window.YT?.Player) return createPlayer();
+  const s = document.createElement('script');
+  s.src = 'https://www.youtube.com/iframe_api';
+  s.onerror = () => showVideoError('load');
+  document.head.appendChild(s);
+})();
+
+function showVideoError(code) {
+  const msg = {
+    2: "That link doesn't point to a valid video.",
+    5: "This video can't play in this browser.",
+    100: 'This video was removed or made private.',
+    101: "The video's owner doesn't allow it to play on other websites. Try a different video.",
+    150: "The video's owner doesn't allow it to play on other websites. Try a different video.",
+    153: "YouTube blocked the player. Try reloading the page.",
+    load: "YouTube's player couldn't load. Check your connection or turn off ad/content blockers, then reload.",
+  }[code] || `YouTube error ${code}. Try another video.`;
+  $('#videoErrorText').textContent = msg;
+  $('#videoError').classList.remove('hidden');
+  $('#tapToPlay').classList.add('hidden');
+}
+
+// Phones (and some browsers) block videos that start by themselves with sound.
+// If playback doesn't start, play muted and offer "Tap for sound"; if even that fails, show a big Tap to play.
+let autoplayCheck = null;
+function ensurePlaying() {
+  clearTimeout(autoplayCheck);
+  autoplayCheck = setTimeout(() => {
+    if (!lastState?.playing || !playerReady) return;
+    const st = player.getPlayerState();
+    if (st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING) return;
+    suppress(1500);
+    player.mute();
+    player.playVideo();
+    $('#soundBtn').classList.remove('hidden');
+    setTimeout(() => {
+      const st2 = player.getPlayerState();
+      if (lastState?.playing && st2 !== YT.PlayerState.PLAYING && st2 !== YT.PlayerState.BUFFERING) {
+        $('#tapToPlay').classList.remove('hidden');
+      }
+    }, 1500);
+  }, 1500);
+}
+function suppress(ms) {
+  applyingRemote = true;
+  clearTimeout(remoteTimer);
+  remoteTimer = setTimeout(() => (applyingRemote = false), ms);
+}
+$('#tapToPlay').onclick = () => {
+  $('#tapToPlay').classList.add('hidden');
+  if (!lastState) return;
+  suppress(1500);
+  player.unMute();
+  player.seekTo(expectedTime(), true);
+  player.playVideo();
+  $('#soundBtn').classList.add('hidden');
+};
+$('#soundBtn').onclick = () => {
+  player.unMute();
+  if (lastState?.playing) player.playVideo();
+  $('#soundBtn').classList.add('hidden');
 };
 
 function parseYouTubeId(input) {
@@ -151,16 +219,18 @@ function applyState(s) {
   $('#emptyScreen').classList.add('hidden');
   if (s.by && !s.loaded) toast(`${s.by} ${s.playing ? 'played' : 'paused'}`);
   if (!playerReady) return; // onReady will apply it
-  applyingRemote = true;
-  clearTimeout(remoteTimer);
-  remoteTimer = setTimeout(() => (applyingRemote = false), 900);
+  $('#tapToPlay').classList.add('hidden');
   if (currentId() !== s.id) {
+    $('#videoError').classList.add('hidden');
+    suppress(2500); // loading a new video takes longer
     if (s.playing) player.loadVideoById(s.id, s.time);
     else player.cueVideoById(s.id, s.time);
-    return;
+  } else {
+    suppress(900);
+    if (Math.abs(player.getCurrentTime() - s.time) > 1) player.seekTo(s.time, true);
+    if (s.playing) player.playVideo(); else player.pauseVideo();
   }
-  if (Math.abs(player.getCurrentTime() - s.time) > 1) player.seekTo(s.time, true);
-  if (s.playing) player.playVideo(); else player.pauseVideo();
+  if (s.playing) ensurePlaying();
 }
 socket.on('video:state', applyState);
 
@@ -174,6 +244,7 @@ function emitState(playing) {
 }
 
 function onStateChange(e) {
+  if (e.data === YT.PlayerState.PLAYING) $('#tapToPlay').classList.add('hidden');
   if (applyingRemote) return;
   if (e.data === YT.PlayerState.PLAYING) emitState(true);
   else if (e.data === YT.PlayerState.PAUSED) emitState(false);
@@ -186,9 +257,8 @@ setInterval(() => {
   const diff = Math.abs(player.getCurrentTime() - expectedTime());
   if (st === YT.PlayerState.PAUSED && !lastState.playing && diff > 1.5) emitState(false);
   else if (st === YT.PlayerState.PLAYING && lastState.playing && diff > 2.5) {
-    applyingRemote = true;
+    suppress(900);
     player.seekTo(expectedTime(), true);
-    clearTimeout(remoteTimer); remoteTimer = setTimeout(() => (applyingRemote = false), 900);
   }
 }, 1000);
 
