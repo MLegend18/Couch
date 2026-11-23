@@ -1,0 +1,104 @@
+:root {
+  --bg: #0f0d12;
+  --panel: #18151d;
+  --panel-2: #221e29;
+  --line: #2f2938;
+  --text: #f3eef7;
+  --muted: #9a90a6;
+  --accent: #ff6b3d;
+  --accent-2: #ffb347;
+  --live: #ff3355;
+  --radius: 14px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: radial-gradient(1200px 600px at 10% -10%, #2a1a2e 0%, transparent 60%), var(--bg);
+  color: var(--text);
+  font: 15px/1.45 Inter, system-ui, sans-serif;
+}
+.hidden { display: none !important; }
+button, input { font: inherit; color: inherit; }
+input {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; width: 100%; outline: none;
+}
+input:focus { border-color: var(--accent); }
+button { cursor: pointer; border: 0; border-radius: 10px; padding: 10px 14px; white-space: nowrap; }
+.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #1a0f08; font-weight: 600; }
+.ghost { background: var(--panel-2); border: 1px solid var(--line); }
+.ghost:hover { border-color: var(--muted); }
+.danger { background: var(--live); color: #fff; font-weight: 600; }
+.chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 13px; }
+
+.brand { font: 700 20px 'Space Grotesk', sans-serif; display: flex; align-items: center; gap: 8px; letter-spacing: -0.02em; }
+.brand.big { font-size: 40px; }
+.dot { width: .6em; height: .6em; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 0 18px var(--accent); }
+
+/* Lobby */
+.lobby { min-height: 100%; display: grid; place-items: center; padding: 24px; }
+.lobby-card { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 32px; }
+.tag { color: var(--muted); margin: 6px 0 24px; }
+form label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+form label input { margin-top: 6px; }
+.row { display: flex; gap: 8px; margin-top: 6px; }
+.row input { margin-top: 0; text-transform: uppercase; }
+.lobby-card .primary { width: 100%; padding: 12px; margin-top: 6px; }
+.error { color: #ff8a8a; min-height: 1.2em; font-size: 13px; }
+.fine { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+
+/* Room layout */
+.app {
+  height: 100%; display: grid; gap: 16px; padding: 16px;
+  grid-template-columns: 1fr 340px; grid-template-rows: auto 1fr;
+  grid-template-areas: "top top" "stage side";
+}
+.top { grid-area: top; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.people { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.person { font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; }
+.person.me { border-color: var(--accent); }
+.person.live::before { content: '● '; color: var(--live); }
+
+.stage { grid-area: stage; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.screen { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); }
+.screen iframe, #player { position: absolute; inset: 0; width: 100%; height: 100%; }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px;
+  background: repeating-linear-gradient(135deg, #141118 0 14px, #17131c 14px 28px); }
+.empty h2 { font: 700 26px 'Space Grotesk', sans-serif; margin: 0 0 6px; }
+.empty p { color: var(--muted); margin: 0; }
+.loadbar { display: flex; gap: 8px; }
+.reactions { display: flex; gap: 6px; }
+.reactions button { background: var(--panel); border: 1px solid var(--line); font-size: 20px; padding: 6px 10px; transition: transform .1s; }
+.reactions button:active { transform: scale(1.25); }
+
+.floaters { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.floater { position: absolute; bottom: 10px; font-size: 34px; animation: rise 2.6s ease-out forwards; text-align: center; }
+.floater small { display: block; font-size: 11px; color: #fff; text-shadow: 0 1px 3px #000; }
+@keyframes rise { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-300px); opacity: 0; } }
+
+/* Side */
+.side { grid-area: side; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.live { position: relative; background: #000; border: 1px solid var(--live); border-radius: var(--radius); overflow: hidden; }
+.live video { width: 100%; display: block; aspect-ratio: 16/9; object-fit: contain; background: #000; }
+.live-head { position: absolute; top: 8px; left: 8px; z-index: 1; font-size: 13px; text-shadow: 0 1px 3px #000; }
+.badge { background: var(--live); color: #fff; font-weight: 700; font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+.unmute { position: absolute; bottom: 8px; right: 8px; }
+.golive { display: flex; gap: 8px; flex-wrap: wrap; }
+.golive button { flex: 1; font-size: 13px; }
+
+.chat { flex: 1; min-height: 240px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+#messages { list-style: none; margin: 0; padding: 12px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+#messages li b { color: var(--accent-2); margin-right: 6px; }
+#messages li.sys { color: var(--muted); font-size: 12px; font-style: italic; }
+#chatForm { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0;
+  background: var(--panel-2); border: 1px solid var(--line); padding: 10px 16px; border-radius: 999px; transition: .25s; pointer-events: none; font-size: 14px; }
+.toast.show { opacity: 1; transform: translateX(-50%); }
+
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; grid-template-areas: "top" "stage" "side"; height: auto; min-height: 100%; }
+  .people { margin-left: 0; }
+  .loadbar { flex-wrap: wrap; }
+  .loadbar input { flex-basis: 100%; }
+}

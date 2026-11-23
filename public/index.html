@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Couch — watch together</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Lobby -->
+  <main id="lobby" class="lobby">
+    <div class="lobby-card">
+      <div class="brand big"><span class="dot"></span>Couch</div>
+      <p class="tag">Watch videos in sync and go live with your people.</p>
+      <form id="joinForm">
+        <label>Your name
+          <input id="nameInput" maxlength="24" placeholder="e.g. Shawn" required autocomplete="nickname" />
+        </label>
+        <label>Room code
+          <div class="row">
+            <input id="roomInput" maxlength="8" placeholder="e.g. FRIDAY" autocomplete="off" />
+            <button type="button" id="randomBtn" class="ghost" title="Make a new room code">New</button>
+          </div>
+        </label>
+        <button type="submit" class="primary">Join room</button>
+        <p id="lobbyError" class="error" role="alert"></p>
+      </form>
+      <p class="fine">Share the room link with friends. Anyone with the code can join.</p>
+    </div>
+  </main>
+
+  <!-- Room -->
+  <div id="app" class="app hidden">
+    <header class="top">
+      <div class="brand"><span class="dot"></span>Couch</div>
+      <button id="copyLink" class="chip" title="Copy invite link">Room <b id="roomCode"></b> · Copy invite</button>
+      <div id="people" class="people"></div>
+    </header>
+
+    <section class="stage">
+      <div class="screen">
+        <div id="player"></div>
+        <div id="emptyScreen" class="empty">
+          <div>
+            <h2>Nothing playing yet</h2>
+            <p>Paste a YouTube link below. Everyone in the room watches in sync.</p>
+          </div>
+        </div>
+        <div id="floaters" class="floaters"></div>
+      </div>
+
+      <form id="loadForm" class="loadbar">
+        <input id="urlInput" placeholder="Paste a YouTube link…" autocomplete="off" />
+        <button class="primary">Play for everyone</button>
+        <button type="button" id="syncBtn" class="ghost" title="Jump to where the room is">Re-sync</button>
+      </form>
+
+      <div class="reactions">
+        <button data-e="😂">😂</button><button data-e="🔥">🔥</button><button data-e="😮">😮</button>
+        <button data-e="❤️">❤️</button><button data-e="👏">👏</button><button data-e="💀">💀</button>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div id="livePanel" class="live hidden">
+        <div class="live-head"><span class="badge">LIVE</span> <span id="liveName"></span></div>
+        <video id="liveVideo" autoplay playsinline muted></video>
+        <button id="unmuteBtn" class="chip unmute">🔇 Tap to unmute</button>
+      </div>
+
+      <div class="golive">
+        <button id="camBtn" class="ghost">🎥 Go live (camera)</button>
+        <button id="screenBtn" class="ghost">🖥️ Share screen</button>
+        <button id="stopBtn" class="danger hidden">■ End live</button>
+      </div>
+
+      <div class="chat">
+        <ol id="messages"></ol>
+        <form id="chatForm">
+          <input id="chatInput" maxlength="500" placeholder="Say something…" autocomplete="off" />
+          <button class="primary">Send</button>
+        </form>
+      </div>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="app.js"></script>
+</body>
+</html>
