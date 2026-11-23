@@ -2,7 +2,16 @@
 const $ = (s) => document.querySelector(s);
 const socket = io({ autoConnect: false });
 
-const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+let ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+let hasRelay = false;
+// Ask the server for relay (TURN) servers so phones on cell data can connect.
+fetch('/ice').then((r) => r.json()).then((d) => {
+  if (Array.isArray(d?.servers) && d.servers.length) ICE = { iceServers: d.servers };
+  hasRelay = !!d?.relay;
+}).catch(() => {});
+
+// In-app browsers (Instagram, Messenger, Snapchat, TikTok…) usually block the camera.
+const inAppBrowser = /Instagram|FBAN|FBAV|FB_IAB|Messenger|Snapchat|TikTok|musical_ly|Line\/|Twitter|LinkedInApp/i.test(navigator.userAgent);
 
 let myId = null;
 let roomCode = null;
@@ -99,10 +108,10 @@ socket.on('react', ({ emoji, name }) => {
 });
 
 let toastTimer;
-function toast(text) {
+function toast(text, ms = 2200) {
   const t = $('#toast');
   t.textContent = text; t.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 // ---------- Watch together (YouTube sync) ----------
@@ -213,12 +222,21 @@ function makePeer(key, remoteId) {
 
 async function startLive(kind) {
   if (localStream) return;
+  if (!navigator.mediaDevices?.getUserMedia || (kind === 'screen' && !navigator.mediaDevices.getDisplayMedia)) {
+    return toast(kind === 'screen'
+      ? "This browser can't share its screen. Phones can only go live with the camera."
+      : inAppBrowser ? 'Open this link in Safari or Chrome to go live — this app blocks the camera.'
+        : "This browser can't use the camera. Try Safari or Chrome.", 6000);
+  }
   try {
     localStream = kind === 'screen'
       ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
       : await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   } catch (err) {
-    return toast(err.name === 'NotAllowedError' ? 'Camera/screen permission was blocked' : 'Could not start video');
+    return toast(err.name === 'NotAllowedError'
+      ? (inAppBrowser ? 'Open this link in Safari or Chrome to go live — this app blocks the camera.'
+        : 'Camera was blocked. Allow camera access for this site in your browser settings, then try again.')
+      : 'Could not start the camera — is another app using it?', 6000);
   }
   socket.emit('live:start', null, (res) => {
     if (res?.error) { stopTracks(); return toast(res.error); }
@@ -272,6 +290,15 @@ socket.on('rtc:signal', ({ from, data }) => {
     if (key !== keyOf(from, myId) || data.sdp?.type !== 'offer') return;
     entry = makePeer(key, from);
     entry.pc.ontrack = (e) => setTileStream(from, e.streams[0]);
+    setTileStatus(from, 'Connecting…');
+    entry.pc.onconnectionstatechange = () => {
+      const st = entry.pc.connectionState;
+      if (st === 'connected') setTileStatus(from, '');
+      else if (st === 'failed') setTileStatus(from, hasRelay
+        ? "Couldn't connect. Tap to retry."
+        : "Couldn't connect: their network blocks direct video. Tap to retry. (Fix: add a relay server — see README.)", true);
+      else if (st === 'disconnected') setTileStatus(from, 'Reconnecting…');
+    };
   }
   entry.chain = entry.chain.then(async () => {
     const { pc } = entry;
@@ -296,7 +323,7 @@ function addTile(id, name, stream, isSelf) {
     t.className = 'tile';
     t.id = `tile-${id}`;
     t.innerHTML = '<div class="live-head"><span class="badge">LIVE</span> <span class="nm"></span></div>'
-      + '<video autoplay playsinline muted></video><button class="chip unmute">🔇 Unmute</button>';
+      + '<video autoplay playsinline muted></video><div class="status hidden"></div><button class="chip unmute">🔇 Unmute</button>';
     const v = t.querySelector('video');
     const b = t.querySelector('button');
     if (isSelf) b.remove();
@@ -306,7 +333,17 @@ function addTile(id, name, stream, isSelf) {
   }
   t.querySelector('.nm').textContent = isSelf ? 'You' : name;
   if (stream) setTileStream(id, stream);
+  else if (!isSelf) setTileStatus(id, 'Connecting…');
   updateGrid();
+}
+function setTileStatus(id, text, retry = false) {
+  const t = tileOf(id);
+  const el = t?.querySelector('.status');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('hidden', !text);
+  el.onclick = retry ? () => { closePeer(keyOf(id, myId)); setTileStatus(id, 'Connecting…'); socket.emit('live:watch', { id }); } : null;
+  el.style.cursor = retry ? 'pointer' : '';
 }
 function setTileStream(id, stream) {
   const v = tileOf(id)?.querySelector('video');

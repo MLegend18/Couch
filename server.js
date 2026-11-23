@@ -17,6 +17,30 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (_req, res) => res.send('ok'));
 
+// ---- Relay (TURN) servers for live video ----
+// Phones on cell data and some home routers can't connect browser-to-browser directly.
+// A TURN relay fixes that. Set METERED_APP and METERED_API_KEY (free at metered.ca) in Render.
+const STUN = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+let iceCache = { at: 0, servers: null };
+async function getIceServers() {
+  const { METERED_APP, METERED_API_KEY } = process.env;
+  if (!METERED_APP || !METERED_API_KEY) return { servers: STUN, relay: false };
+  if (iceCache.servers && Date.now() - iceCache.at < 60 * 60 * 1000) return { servers: iceCache.servers, relay: true };
+  try {
+    const url = `https://${METERED_APP}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(METERED_API_KEY)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const servers = await res.json();
+    if (!Array.isArray(servers) || !servers.length) throw new Error('empty list');
+    iceCache = { at: Date.now(), servers };
+    return { servers, relay: true };
+  } catch (err) {
+    console.warn('Could not get TURN credentials:', err.message);
+    return { servers: STUN, relay: false };
+  }
+}
+app.get('/ice', async (_req, res) => res.json(await getIceServers()));
+
 /** code -> { users: Map<socketId,{name}>, video, broadcasters: Set<socketId>, chat[] } */
 const MAX_LIVE = 4;
 const rooms = new Map();

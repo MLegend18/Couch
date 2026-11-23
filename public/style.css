@@ -124,3 +124,18 @@ form label input { margin-top: 6px; }
 .banner.live { border-color: var(--live); box-shadow: 0 8px 30px rgba(0,0,0,.5), 0 0 24px rgba(255,51,85,.45); }
 @keyframes bannerIn { from { transform: translateY(-30px) scale(.8); opacity: 0; } }
 @keyframes bannerOut { to { transform: translateY(-20px); opacity: 0; } }
+
+.tile .status { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 12px;
+  background: rgba(15, 13, 18, .82); font-size: 13px; color: var(--text); }
+
+/* Phones: show live tiles right under the header so they're not buried below the chat */
+@media (max-width: 860px) {
+  .app { grid-template-areas: "top" "live" "stage" "side"; grid-template-rows: auto auto auto 1fr; }
+  .side { display: contents; }
+  .livegrid { grid-area: live; }
+  .golive, .chat { grid-column: 1; }
+  .chat { min-height: 320px; }
+  .react-label { display: none; }
+  .reactions { gap: 6px; padding: 6px 10px; flex-wrap: nowrap; }
+  .reactions button { width: 44px; height: 44px; font-size: 22px; }
+}

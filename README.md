@@ -39,7 +39,11 @@ Files: `server.js` (the server), `public/index.html`, `public/style.css`, `publi
 ## Known limits of this first version
 
 - **Live audience size:** each person who's live sends a separate copy of their video to every viewer, so it works best for small groups (about 2 to 6 people). For bigger audiences, swap the WebRTC part for a media service such as LiveKit, Agora or Mux.
-- **Some networks block live video**, mainly strict work, school or mobile networks. Fixing that needs a TURN relay server: add its address to `ICE` at the top of `public/app.js`. Metered.ca and Twilio both have free TURN tiers.
+- **Phones on cell data, and some networks, block live video** unless the app has a relay (TURN) server. To turn one on for free:
+  1. Sign up at https://www.metered.ca/tools/openrelay/ (free: 20 GB of relay traffic a month).
+  2. In the Metered dashboard, note your **app name** (the part before `.metered.live`) and your **TURN API key**.
+  3. In Render, open your service → **Environment** → add `METERED_APP` (the app name) and `METERED_API_KEY` (the key), then save. Render restarts the app on its own.
+- **Phones can go live with the camera only**, not screen share. And links opened inside Instagram, Messenger, Snapchat and similar apps usually block the camera, so the app tells people to open the link in Safari or Chrome instead.
 - **Anyone in a room can control playback.** A host-only mode would be a good next feature.
 - **Nothing is saved.** A room and its chat disappear when the last person leaves.
 - **Some YouTube videos can't be embedded**, because their owners have turned embedding off.
